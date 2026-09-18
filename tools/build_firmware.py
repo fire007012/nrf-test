@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
@@ -50,6 +51,76 @@ REQUIRED_CONFIG = {
     "CONFIG_BT_CTLR_HCI": "y",
 }
 
+DK_BOARD = "nrf52840dk/nrf52840"
+DK_OUTPUT_DIRECTORY_NAME = "pca10056-tester"
+# DK 没有原厂 bootloader：应用从 0x0 链接，镜像上限是完整的 1MB flash。
+DK_APPLICATION_START = 0x0
+DK_FLASH_IMAGE_LIMIT = NRF52840_FLASH_END
+
+DK_REQUIRED_CONFIG = {
+    "CONFIG_BOOTLOADER_MCUBOOT": "n",
+    "CONFIG_USE_DT_CODE_PARTITION": "n",
+    "CONFIG_UART_PIPE": "y",
+    "CONFIG_UART_INTERRUPT_DRIVEN": "y",
+    "CONFIG_UART_CONSOLE": "n",
+    "CONFIG_CONSOLE": "n",
+    "CONFIG_PRINTK": "n",
+    "CONFIG_HWINFO": "y",
+    "CONFIG_BOOT_BANNER": "n",
+    "CONFIG_TEST_LOGGING_DEFAULTS": "n",
+    "CONFIG_LOG": "n",
+    "CONFIG_BT": "y",
+    "CONFIG_BT_PERIPHERAL": "y",
+    "CONFIG_BT_GATT_DYNAMIC_DB": "y",
+    "CONFIG_BT_HCI": "y",
+    "CONFIG_BT_HCI_HOST": "y",
+    "CONFIG_BT_LL_SW_SPLIT": "y",
+    "CONFIG_HAS_BT_CTLR": "y",
+    "CONFIG_BT_CTLR_HCI": "y",
+}
+
+
+@dataclass(frozen=True)
+class BoardVariant:
+    """One explicitly selected hardware target for the pinned Tester firmware."""
+
+    name: str
+    board: str
+    output_directory_name: str
+    config_path: Path
+    overlay_path: Path
+    required_config: Mapping[str, str]
+    application_start: int = APPLICATION_START
+    # 段上限：Dongle 是原厂 bootloader 起点，DK 是完整 flash 末尾。
+    flash_image_limit: int = BOOTLOADER_START
+
+
+DONGLE_VARIANT = BoardVariant(
+    name="dongle",
+    board=BOARD,
+    output_directory_name=OUTPUT_DIRECTORY_NAME,
+    config_path=CONFIG_PATH,
+    overlay_path=OVERLAY_PATH,
+    required_config=REQUIRED_CONFIG,
+    application_start=APPLICATION_START,
+    flash_image_limit=BOOTLOADER_START,
+)
+
+DK_VARIANT = BoardVariant(
+    name="dk",
+    board=DK_BOARD,
+    output_directory_name=DK_OUTPUT_DIRECTORY_NAME,
+    config_path=PROJECT_ROOT / "firmware" / "app" / "pca10056.conf",
+    overlay_path=PROJECT_ROOT / "firmware" / "app" / "pca10056.overlay",
+    required_config=DK_REQUIRED_CONFIG,
+    application_start=DK_APPLICATION_START,
+    flash_image_limit=DK_FLASH_IMAGE_LIMIT,
+)
+
+BOARD_VARIANTS: Mapping[str, BoardVariant] = {
+    variant.name: variant for variant in (DONGLE_VARIANT, DK_VARIANT)
+}
+
 
 class FirmwareBuildError(RuntimeError):
     """Raised when the pinned Tester firmware cannot be built or validated safely."""
@@ -90,10 +161,13 @@ def parse_dotconfig(path: Path) -> dict[str, str]:
     return values
 
 
-def validate_required_config(values: Mapping[str, str]) -> None:
+def validate_required_config(
+    values: Mapping[str, str],
+    required_config: Mapping[str, str] = REQUIRED_CONFIG,
+) -> None:
     mismatches = [
         f"{name}: expected {expected}, found {values.get(name, '<missing>')}"
-        for name, expected in REQUIRED_CONFIG.items()
+        for name, expected in required_config.items()
         if values.get(name, "n") != expected
     ]
     if mismatches:
@@ -113,20 +187,27 @@ def flash_segments_from_hex(path: Path) -> list[tuple[int, int]]:
     return [(int(start), int(end)) for start, end in segments]
 
 
-def validate_flash_segments(segments: Sequence[tuple[int, int]]) -> list[tuple[int, int]]:
+def validate_flash_segments(
+    segments: Sequence[tuple[int, int]],
+    *,
+    application_start: int = APPLICATION_START,
+    flash_image_limit: int = BOOTLOADER_START,
+) -> list[tuple[int, int]]:
     flash_segments = [
         (start, end) for start, end in segments if start < NRF52840_FLASH_END and end > 0
     ]
     if not flash_segments:
         raise FirmwareBuildError("generated HEX contains no nRF52840 internal flash data")
     for start, end in flash_segments:
-        if start < APPLICATION_START:
+        if start < application_start:
             raise FirmwareBuildError(
-                f"generated HEX overlaps the MBR-reserved range: 0x{start:x}-0x{end:x}"
+                f"generated HEX overlaps the reserved range below 0x{application_start:x}: "
+                + f"0x{start:x}-0x{end:x}"
             )
-        if end > BOOTLOADER_START:
+        if end > flash_image_limit:
             raise FirmwareBuildError(
-                f"generated HEX overlaps the onboard bootloader range: 0x{start:x}-0x{end:x}"
+                f"generated HEX exceeds the flash image limit 0x{flash_image_limit:x}: "
+                + f"0x{start:x}-0x{end:x}"
             )
     return flash_segments
 
@@ -169,6 +250,7 @@ def _write_manifest(
     build_root: Path,
     flash_segments: Sequence[tuple[int, int]],
     generated_config: Mapping[str, str],
+    variant: BoardVariant = DONGLE_VARIANT,
 ) -> Path:
     pins = load_upstream_pins()
     zephyr_output = build_root / "zephyr"
@@ -181,7 +263,7 @@ def _write_manifest(
     manifest = {
         "schema_version": 1,
         "generated_at_utc": datetime.now(UTC).isoformat(),
-        "board": BOARD,
+        "board": variant.board,
         "application": APPLICATION_RELATIVE_PATH.as_posix(),
         "zephyr": {
             "repository": pins.zephyr.repository,
@@ -191,17 +273,19 @@ def _write_manifest(
         },
         "inputs": {
             "config": {
-                "path": CONFIG_PATH.relative_to(PROJECT_ROOT).as_posix(),
-                "sha256": sha256_file(CONFIG_PATH),
+                "path": variant.config_path.relative_to(PROJECT_ROOT).as_posix(),
+                "sha256": sha256_file(variant.config_path),
             },
             "overlay": {
-                "path": OVERLAY_PATH.relative_to(PROJECT_ROOT).as_posix(),
-                "sha256": sha256_file(OVERLAY_PATH),
+                "path": variant.overlay_path.relative_to(PROJECT_ROOT).as_posix(),
+                "sha256": sha256_file(variant.overlay_path),
             },
             # Retained for schema compatibility: local patches are no longer supported.
             "tester_patch": None,
         },
-        "validated_config": {name: generated_config.get(name, "n") for name in REQUIRED_CONFIG},
+        "validated_config": {
+            name: generated_config.get(name, "n") for name in variant.required_config
+        },
         "nrf52840_flash_segments": [
             {"start": f"0x{start:x}", "end_exclusive": f"0x{end:x}"}
             for start, end in flash_segments
@@ -220,16 +304,16 @@ def _write_manifest(
     return path
 
 
-def build_firmware(settings: dict[str, ResolvedValue]) -> None:
+def build_firmware(settings: dict[str, ResolvedValue], variant: BoardVariant) -> None:
     pins = load_upstream_pins()
     verify_upstream(pins, settings)
     verify_host_tools(load_dtc_pin(), settings)
 
     zephyr_root = _required_path(settings, "zephyr_root")
     sdk_root = _required_path(settings, "zephyr_sdk_root")
-    build_root = _required_path(settings, "build_dir") / OUTPUT_DIRECTORY_NAME
+    build_root = _required_path(settings, "build_dir") / variant.output_directory_name
     upstream_application = zephyr_root / APPLICATION_RELATIVE_PATH
-    for required in (upstream_application, CONFIG_PATH, OVERLAY_PATH):
+    for required in (upstream_application, variant.config_path, variant.overlay_path):
         if not required.exists():
             raise FirmwareBuildError(f"required firmware input does not exist: {required}")
     build_root.parent.mkdir(parents=True, exist_ok=True)
@@ -239,13 +323,13 @@ def build_firmware(settings: dict[str, ResolvedValue]) -> None:
         "build",
         "--pristine=always",
         "--board",
-        BOARD,
+        variant.board,
         "--build-dir",
         str(build_root),
         str(upstream_application),
         "--",
-        f"-DEXTRA_CONF_FILE={CONFIG_PATH.as_posix()}",
-        f"-DDTC_OVERLAY_FILE={OVERLAY_PATH.as_posix()}",
+        f"-DEXTRA_CONF_FILE={variant.config_path.as_posix()}",
+        f"-DDTC_OVERLAY_FILE={variant.overlay_path.as_posix()}",
     ]
     _run_build(
         command,
@@ -254,13 +338,18 @@ def build_firmware(settings: dict[str, ResolvedValue]) -> None:
     )
 
     generated_config = parse_dotconfig(build_root / "zephyr" / ".config")
-    validate_required_config(generated_config)
+    validate_required_config(generated_config, variant.required_config)
     all_segments = flash_segments_from_hex(build_root / "zephyr" / "zephyr.hex")
-    flash_segments = validate_flash_segments(all_segments)
+    flash_segments = validate_flash_segments(
+        all_segments,
+        application_start=variant.application_start,
+        flash_image_limit=variant.flash_image_limit,
+    )
     manifest = _write_manifest(
         build_root,
         flash_segments,
         generated_config,
+        variant,
     )
     print(f"Firmware verified: {build_root / 'zephyr' / 'zephyr.hex'}")
     print(f"Build manifest: {manifest}")
@@ -269,12 +358,19 @@ def build_firmware(settings: dict[str, ResolvedValue]) -> None:
 class FirmwareArguments(argparse.Namespace):
     config: str | None = None
     build_dir: str | None = None
+    board: str = "dongle"
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Build the pinned Zephyr Tester for PCA10059")
+    parser = argparse.ArgumentParser(description="Build the pinned Zephyr Tester firmware")
     _ = parser.add_argument("--config", help="path to the machine-local TOML configuration")
     _ = parser.add_argument("--build-dir", help="firmware build root override")
+    _ = parser.add_argument(
+        "--board",
+        choices=tuple(BOARD_VARIANTS),
+        default="dongle",
+        help="explicit hardware target: dongle (PCA10059) or dk (PCA10056, nRF52840 DK)",
+    )
     return parser
 
 
@@ -286,7 +382,8 @@ def main() -> int:
             resolve_current_settings(
                 {"build_dir": arguments.build_dir},
                 config_path=arguments.config,
-            )
+            ),
+            BOARD_VARIANTS[arguments.board],
         )
     except (ConfigError, FirmwareBuildError) as error:
         print(f"firmware build error: {error}", file=sys.stderr)

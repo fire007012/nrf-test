@@ -5,6 +5,8 @@ from pathlib import Path
 import pytest
 
 from tools.build_firmware import (
+    DK_REQUIRED_CONFIG,
+    DK_VARIANT,
     REQUIRED_CONFIG,
     FirmwareBuildError,
     _build_environment,
@@ -105,3 +107,55 @@ def test_flash_validation_rejects_reserved_or_missing_application(
 ) -> None:
     with pytest.raises(FirmwareBuildError):
         _ = validate_flash_segments(segments)
+
+
+def test_dk_variant_links_from_zero_without_bootloader_constraints() -> None:
+    assert DK_VARIANT.board == "nrf52840dk/nrf52840"
+    assert DK_VARIANT.application_start == 0x0
+    assert DK_VARIANT.flash_image_limit == 0x100000
+    assert "CONFIG_BOARD_HAS_NRF5_BOOTLOADER" not in DK_REQUIRED_CONFIG
+    assert "CONFIG_FLASH_LOAD_OFFSET" not in DK_REQUIRED_CONFIG
+
+
+def test_dk_flash_validation_accepts_zero_base_and_full_flash() -> None:
+    assert validate_flash_segments(
+        [(0x0, 0x1000), (0x1000, 0x100000)],
+        application_start=DK_VARIANT.application_start,
+        flash_image_limit=DK_VARIANT.flash_image_limit,
+    ) == [(0x0, 0x1000), (0x1000, 0x100000)]
+
+
+@pytest.mark.parametrize("segments", [[(0x0, 0x100001)], []])
+def test_dk_flash_validation_rejects_overflow_or_missing_application(
+    segments: list[tuple[int, int]],
+) -> None:
+    with pytest.raises(FirmwareBuildError):
+        _ = validate_flash_segments(
+            segments,
+            application_start=DK_VARIANT.application_start,
+            flash_image_limit=DK_VARIANT.flash_image_limit,
+        )
+
+
+def test_dk_generated_config_rejects_text_output() -> None:
+    values = dict(DK_REQUIRED_CONFIG)
+    values["CONFIG_UART_INTERRUPT_DRIVEN"] = "n"
+
+    with pytest.raises(
+        FirmwareBuildError, match="CONFIG_UART_INTERRUPT_DRIVEN: expected y, found n"
+    ):
+        validate_required_config(values, DK_REQUIRED_CONFIG)
+
+
+def test_build_manifest_records_dk_variant(tmp_path: Path) -> None:
+    output = tmp_path / "zephyr"
+    output.mkdir()
+    for name in ("zephyr.elf", "zephyr.hex", "zephyr.bin"):
+        _ = (output / name).write_bytes(name.encode("ascii"))
+
+    manifest_path = _write_manifest(tmp_path, [(0x0, 0x2000)], {}, DK_VARIANT)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert manifest["board"] == DK_VARIANT.board
+    assert manifest["inputs"]["config"]["path"].endswith("pca10056.conf")
+    assert manifest["inputs"]["overlay"]["path"].endswith("pca10056.overlay")

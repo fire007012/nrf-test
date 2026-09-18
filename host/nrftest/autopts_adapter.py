@@ -17,8 +17,26 @@ from host.nrftest.interprocess_lock import InterprocessFileLock, InterprocessLoc
 
 APPLICATION_USB_VID = 0x2FE3
 APPLICATION_USB_PID = 0x0004
+# DK（PCA10056）板载 SEGGER J-Link OB 的 CDC VCOM，BTP 经 UART0 到达该端口。
+DK_JLINK_USB_VID = 0x1366
+DK_JLINK_USB_PID = 0x1061
 CONTROLLER_INDEX = 0
 UUID128_ALL_AD_TYPE = 0x07
+
+UsbIdentity = tuple[int, int]
+
+TRANSPORT_USB_IDENTITIES: Mapping[str, tuple[UsbIdentity, ...]] = {
+    "dongle": ((APPLICATION_USB_VID, APPLICATION_USB_PID),),
+    "dk": ((DK_JLINK_USB_VID, DK_JLINK_USB_PID),),
+}
+
+
+def transport_usb_identities(transport: str = "dongle") -> tuple[UsbIdentity, ...]:
+    identities = TRANSPORT_USB_IDENTITIES.get(transport)
+    if identities is None:
+        known = ", ".join(sorted(TRANSPORT_USB_IDENTITIES))
+        raise AutoPtsAdapterError(f"unknown transport {transport!r}; known transports: {known}")
+    return identities
 
 
 class AutoPtsAdapterError(RuntimeError):
@@ -329,13 +347,12 @@ def select_application_port(
     port_name: str | None = None,
     serial_number: str | None = None,
     ports: Iterable[SerialPort] | None = None,
+    transport: str = "dongle",
 ) -> SerialIdentity:
     available = list(list_ports.comports() if ports is None else ports)
-    application_ports = [
-        port
-        for port in available
-        if port.vid == APPLICATION_USB_VID and port.pid == APPLICATION_USB_PID
-    ]
+    accepted = transport_usb_identities(transport)
+    application_ports = [port for port in available if (port.vid, port.pid) in accepted]
+    application_identity = " or ".join(f"{vid:04X}:{pid:04X}" for vid, pid in accepted)
 
     if port_name is not None:
         named = [port for port in available if port.device.casefold() == port_name.casefold()]
@@ -346,7 +363,6 @@ def select_application_port(
             )
         selected = named[0]
         if selected not in application_ports:
-            application_identity = f"{APPLICATION_USB_VID:04X}:{APPLICATION_USB_PID:04X}"
             raise AutoPtsAdapterError(
                 f"explicit port {port_name!r} is not the nrftest application identity "
                 + application_identity
@@ -370,7 +386,6 @@ def select_application_port(
             or "<none>"
         )
         selector = f" with serial {serial_number!r}" if serial_number is not None else ""
-        application_identity = f"{APPLICATION_USB_VID:04X}:{APPLICATION_USB_PID:04X}"
         raise AutoPtsAdapterError(
             "nrftest application port selection is ambiguous or empty"
             + f"{selector}; matching {application_identity} ports: {identities}"

@@ -189,6 +189,7 @@ def run_fixture(
     local_name: str = DEFAULT_LOCAL_NAME,
     service_uuid16: str = DEFAULT_SERVICE_UUID16,
     timeout_seconds: int = 60,
+    transport: str = "dongle",
 ) -> Path:
     if not 5 <= timeout_seconds <= 600:
         raise BtpGapRfFixtureError("timeout must be in range 5..=600 seconds")
@@ -205,6 +206,7 @@ def run_fixture(
         identity = select_application_port(
             port_name=selected_port,
             serial_number=configured_serial,
+            transport=transport,
         )
         loaded = load_autopts(_required_path(settings, "autopts_root"))
     except AutoPtsAdapterError as error:
@@ -381,21 +383,28 @@ class FixtureArguments(argparse.Namespace):
     local_name: str = DEFAULT_LOCAL_NAME
     service_uuid16: str = DEFAULT_SERVICE_UUID16
     timeout: int = 60
+    transport: str = "dongle"
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Advertise from PCA10059 and record only nRF-side GAP connection/disconnection facts"
+            "Advertise from the Tester and record only nRF-side GAP connection/disconnection facts"
         )
     )
     _ = parser.add_argument("--config", help="path to the machine-local TOML configuration")
     port_help = "exact current application serial port; otherwise use configured serial/port "
-    port_help += "or the only 2FE3:0004 device"
+    port_help += "or the only application USB device"
     _ = parser.add_argument("--port", help=port_help)
     _ = parser.add_argument("--local-name", default=DEFAULT_LOCAL_NAME)
     _ = parser.add_argument("--service-uuid16", default=DEFAULT_SERVICE_UUID16)
     _ = parser.add_argument("--timeout", type=int, default=60)
+    _ = parser.add_argument(
+        "--transport",
+        choices=("dongle", "dk"),
+        default="dongle",
+        help="application USB identity: dongle (PCA10059 CDC) or dk (J-Link VCOM)",
+    )
     return parser
 
 
@@ -409,6 +418,7 @@ def main() -> int:
             local_name=arguments.local_name,
             service_uuid16=arguments.service_uuid16,
             timeout_seconds=arguments.timeout,
+            transport=arguments.transport,
         )
     except (
         AutoPtsAdapterError,

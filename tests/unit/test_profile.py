@@ -17,7 +17,8 @@ from host.nrftest.profile import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ACTIVE_PROFILE = PROJECT_ROOT / "profiles" / "blehub-nrf-basic-v1.json"
-ACTIVE_PROFILE_SHA256 = "7c6a51d45f928b645b9e3e7c68ecabb26070da5c63fe6ffef37d1300a0b30de1"
+# SHA-256 of the committed profiles/blehub-nrf-basic-v1.json (the reviewed artifact).
+ACTIVE_PROFILE_SHA256 = "2c315af0092cb67ebcdd257913ec96a877edae648a0993f2be707dd725e26924"
 
 PROFILE: dict[str, object] = {
     "schema_version": 1,

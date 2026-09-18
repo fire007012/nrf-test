@@ -1,0 +1,18 @@
+/*
+ * PCA10056（nRF52840 DK）的 Zephyr Devicetree 补充配置：将 UART0
+ * 指定为 Bluetooth Tester 的二进制 BTP uart-pipe transport，
+ * 物理上经板载 SEGGER J-Link OB 的 VCOM 连接主机。
+ */
+
+/ {
+	chosen {
+		zephyr,uart-pipe = &uart0;
+	};
+};
+
+&uart0 {
+	compatible = "nordic,nrf-uarte";
+	current-speed = <115200>;
+	status = "okay";
+	hw-flow-control;
+};

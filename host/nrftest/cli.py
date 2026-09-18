@@ -82,6 +82,7 @@ def run_doctor(
     *,
     profile_path: Path = DEFAULT_PROFILE,
     port_name: str | None = None,
+    transport: str = "dongle",
 ) -> Path:
     started_at = datetime.now(UTC)
     upstream = load_upstream_pins()
@@ -97,6 +98,7 @@ def run_doctor(
         reports_root=reports_root,
         port_name=port_name or settings["device_port"].value,
         device_serial=settings["device_serial"].value,
+        transport=transport,
     )
 
     fixture: PeripheralFixture | None = None
@@ -190,6 +192,7 @@ class HostArguments(argparse.Namespace):
     config: str | None = None
     port: str | None = None
     profile: Path = DEFAULT_PROFILE
+    transport: str = "dongle"
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -202,6 +205,12 @@ def _parser() -> argparse.ArgumentParser:
     _ = doctor.add_argument("--config", help="path to the machine-local TOML configuration")
     _ = doctor.add_argument("--port", help="exact application serial port override")
     _ = doctor.add_argument("--profile", type=Path, default=DEFAULT_PROFILE)
+    _ = doctor.add_argument(
+        "--transport",
+        choices=("dongle", "dk"),
+        default="dongle",
+        help="application USB identity: dongle (PCA10059 CDC) or dk (J-Link VCOM)",
+    )
     return parser
 
 
@@ -214,6 +223,7 @@ def main() -> int:
                 resolve_current_settings(config_path=arguments.config),
                 profile_path=arguments.profile,
                 port_name=arguments.port,
+                transport=arguments.transport,
             )
             return 0
         raise HostCliError(f"unsupported command: {arguments.command}")

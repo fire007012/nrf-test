@@ -105,6 +105,7 @@ class FixtureEnvironment:
     reports_root: Path
     port_name: str | None = None
     device_serial: str | None = None
+    transport: str = "dongle"
 
 
 @dataclass(frozen=True)
@@ -142,6 +143,7 @@ class PeripheralFixture:
         identity = select_application_port(
             port_name=environment.port_name,
             serial_number=environment.device_serial,
+            transport=environment.transport,
         )
         loaded = load_autopts(environment.autopts_root)
         session = AutoPtsSession(

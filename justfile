@@ -107,6 +107,14 @@ check-tools:
 firmware-build: require-local-config
     python -m tools.build_firmware
 
+# Build the Tester for the nRF52840 DK (PCA10056); BTP goes to UART0/J-Link VCOM.
+firmware-build-dk: require-local-config
+    python -m tools.build_firmware --board dk
+
+# Flash the validated DK Tester HEX through the onboard J-Link over SWD after SHA identity checks.
+firmware-flash-dk confirm_sha256: require-local-config
+    python -m tools.flash_firmware_dk --confirm-sha256 "{{confirm_sha256}}"
+
 # Package the validated Tester HEX for the stock PCA10059 USB bootloader.
 firmware-package: require-local-config
     python -m tools.package_firmware
@@ -120,12 +128,12 @@ profile-check profile="profiles/blehub-nrf-basic-v1.json":
     python -m tools.profile_check --profile "{{profile}}"
 
 # Run the formal cross-platform Host API doctor and verify the resident Profile.
-host-doctor port="" profile="profiles/blehub-nrf-basic-v1.json":
-    python -m host.nrftest.cli doctor --port "{{port}}" --profile "{{profile}}"
+host-doctor port="" profile="profiles/blehub-nrf-basic-v1.json" transport="dongle":
+    python -m host.nrftest.cli doctor --port "{{port}}" --profile "{{profile}}" --transport "{{transport}}"
 
 # Query Core capabilities through the retained Phase 0/1 probe baseline.
-btp-doctor port="":
-    python -m tools.btp_core_probe --port "{{port}}"
+btp-doctor port="" transport="dongle":
+    python -m tools.btp_core_probe --port "{{port}}" --transport "{{transport}}"
 
 # Build or attach the canonical dynamic GATT Profile and verify nRF-side actual handles/values.
 btp-gatt-profile port="" profile="profiles/blehub-nrf-basic-v1.json":
@@ -178,8 +186,8 @@ btp-gap-host-crash port="" local_name="NrftestCrashRecovery" ready_timeout="90" 
     python -m tools.btp_gap_host_crash_probe --port "{{port}}" --local-name "{{local_name}}" --ready-timeout "{{ready_timeout}}" --release-timeout "{{release_timeout}}"
 
 # Advertise independently and record only nRF-side connection/disconnection RF facts.
-btp-gap-rf-fixture port="" local_name="NrftestP1" service_uuid16="fdf0" timeout="60":
-    python -m tools.btp_gap_rf_fixture --port "{{port}}" --local-name "{{local_name}}" --service-uuid16 "{{service_uuid16}}" --timeout "{{timeout}}"
+btp-gap-rf-fixture port="" local_name="NrftestP1" service_uuid16="fdf0" timeout="60" transport="dongle":
+    python -m tools.btp_gap_rf_fixture --port "{{port}}" --local-name "{{local_name}}" --service-uuid16 "{{service_uuid16}}" --timeout "{{timeout}}" --transport "{{transport}}"
 
 # Format active Python sources. Archived implementations are intentionally excluded.
 fmt:
