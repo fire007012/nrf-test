@@ -195,6 +195,7 @@ def run_probe(
     profile_a_path: Path = DEFAULT_PROFILE_A,
     profile_b_path: Path = DEFAULT_PROFILE_B,
     port_name: str | None = None,
+    transport: str = "dongle",
 ) -> Path:
     upstream = load_upstream_pins()
     verify_upstream(upstream, settings)
@@ -207,6 +208,7 @@ def run_probe(
     identity = select_application_port(
         port_name=port_name or settings["device_port"].value,
         serial_number=settings["device_serial"].value,
+        transport=transport,
     )
     loaded = load_autopts(_required_path(settings, "autopts_root"))
     reports_root = _required_path(settings, "reports_dir")
@@ -319,6 +321,12 @@ def _parser() -> argparse.ArgumentParser:
     _ = parser.add_argument("--profile-b", default=str(DEFAULT_PROFILE_B))
     _ = parser.add_argument("--port", help="explicit application COM/tty port")
     _ = parser.add_argument("--config", help="path to machine-local TOML configuration")
+    _ = parser.add_argument(
+        "--transport",
+        choices=("dongle", "dk"),
+        default="dongle",
+        help="application USB identity: dongle (PCA10059 CDC) or dk (J-Link VCOM)",
+    )
     return parser
 
 
@@ -331,6 +339,7 @@ def main() -> int:
             profile_a_path=Path(arguments.profile_a),
             profile_b_path=Path(arguments.profile_b),
             port_name=arguments.port,
+            transport=arguments.transport,
         )
     except (
         AutoPtsAdapterError,

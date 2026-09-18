@@ -185,6 +185,7 @@ def run_fixture(
     profile_path: Path = DEFAULT_PROFILE,
     port_name: str | None = None,
     timeout_seconds: int = 60,
+    transport: str = "dongle",
 ) -> Path:
     if not 5 <= timeout_seconds <= 600:
         raise BtpGattSubscriptionFixtureError("timeout must be in range 5..=600 seconds")
@@ -203,6 +204,7 @@ def run_fixture(
         reports_root=reports_root,
         port_name=selected_port,
         device_serial=settings["device_serial"].value,
+        transport=transport,
     )
     started_at = datetime.now(UTC).isoformat()
 
@@ -388,6 +390,12 @@ def _parser() -> argparse.ArgumentParser:
     _ = parser.add_argument("--value-hex", required=True)
     _ = parser.add_argument("--after-disable-value-hex", required=True)
     _ = parser.add_argument("--timeout", type=int, default=60)
+    _ = parser.add_argument(
+        "--transport",
+        choices=("dongle", "dk"),
+        default="dongle",
+        help="application USB identity: dongle (PCA10059 CDC) or dk (J-Link VCOM)",
+    )
     return parser
 
 
@@ -402,6 +410,7 @@ def main() -> int:
             profile_path=cast(Path, arguments.profile),
             port_name=cast(str | None, arguments.port) or None,
             timeout_seconds=cast(int, arguments.timeout),
+            transport=cast(str, arguments.transport),
         )
     except (
         AutoPtsAdapterError,

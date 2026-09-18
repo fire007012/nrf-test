@@ -3,11 +3,17 @@
 > 创建：2026-09-18。目的：把主线面向 PCA10059 Dongle 的 nrftest 夹具跑在已接入的
 > nRF52840 DK 上。下次会话直接按本文档顺序执行即可。
 >
-> **进度（2026-09-18 第二次会话）**：T1/T2 已完成并实机验证；T3 已通过构建、刷写、
-> btp-doctor、host-doctor，btp-gap-rf-fixture 已确认 DK 侧真实广播（只剩外部 Central
-> 连接事实的采集）。本机 `nrftest.local.toml` 已更新：COM11 为 BTP 口、
-> `debugger_serial = "1050252028"`、`jlink_library` 指向 **x64** DLL
-> （32 位 JLinkARM.dll 配 64 位 Python 会报 WinError 193）。
+> **✅ 全部完成（2026-09-18，T1–T4 含实机验证）。本文档转为 DK 路径参考保留。**
+>
+> 硬件命令速查（本机）：
+> - 构建/刷写：`just firmware-build-dk` → `just firmware-flash-dk <sha256>`
+> - 探测：`just btp-doctor COM11 dk`、`just host-doctor COM11 <profile> dk`
+> - 复位/恢复：`just btp-target-reset COM11 10 30 dk`、
+>   `just btp-target-recover COM11 <profile> 10 30 dk`
+>
+> 本机 `nrftest.local.toml` 要点：COM11 为 BTP 口、`debugger_serial = "1050252028"`、
+> `jlink_library` 必须指向 **x64** DLL（32 位 JLinkARM.dll 配 64 位 Python 报
+> WinError 193）。
 
 ## 0. 当前已完成的基础（无需重做）
 
@@ -76,9 +82,10 @@ NCS 组合把官方 DK Tester 构建出 ELF/HEX/BIN（仅未刷入实机验证�
       `transport` 参数（`dongle`=2FE3:0004 / `dk`=1366:1061，默认 dongle 不变）
 - [x] `btp_core_probe`、`host.nrftest.cli doctor`、`btp_gap_rf_fixture` 加
       `--transport {dongle,dk}`；justfile 对应 recipe 加 `transport` 参数（默认 dongle）
-- [ ] 其余 Dongle 专用探针（lifecycle / transport-reuse / host-crash /
-      subscription / passive-disconnect / gatt-profile 等）按需补 `--transport`，
-      与 T4 的 target_reset DK 模式一起做
+- [x] 其余全部硬件探针补齐 `--transport`（gap-control / gap-lifecycle /
+      gap-transport-reuse / gap-host-crash 含子进程命令透传 / gatt-profile /
+      gatt-profile-rebuild / gatt-subscription / gatt-passive-disconnect）；
+      justfile 全部对应 recipe 与 `btp-target-recover` 链均支持
 
 ### T3 实机验证（顺序执行）
 - [x] `pixi run just firmware-build-dk` 构建成功（FLASH 32.92%），Kconfig + 段校验通过
@@ -92,11 +99,17 @@ NCS 组合把官方 DK Tester 构建出 ELF/HEX/BIN（仅未刷入实机验证�
       `5b:d0:1e:03:da:41` 连接并断开 → fixture PASS，nRF 侧 RF 事实已记录
 
 ### T4 后续完善（T3 通过后再做）
-- [ ] `target_reset.py` 增加 DK 模式：J-Link 复位后不做"USB 消失/重枚举"校验，
-      改为等待 BTP 重握手
-- [ ] 在 `docs/PLAN.md` 记录 DK 路径的 board variant / partition / 烧写与恢复方式变更
-      （项目规矩：硬件变量切换必须显式记录，不能静默决定）
-- [ ] 把本文档状态更新或归档
+- [x] `target_reset.py` DK 模式（`--transport dk`）：`reset_dk_target` J-Link
+      reset-and-halt → 释放 → 校验 VCOM 身份稳定（不做"USB 消失/重枚举"校验），
+      随后以全新 `AutoPtsSession` 的 Core/GAP 握手为恢复门（带超时重试）；
+      报告场景 `target-reset-dk`。实机验证：COM11 稳定，reset≈0.4s，
+      BTP 重握手≈2.5s（1 次尝试）
+- [x] `btp-target-recover ... dk` 完整恢复链实机验证通过：
+      reset → btp-doctor（GAP attached / GATT registered）→ GATT Profile PASS（重建）
+- [x] 在 `docs/PLAN.md` 8.2 节记录 DK 路径的 board variant / partition / 烧写与
+      恢复方式变更（2026-09-18 T3 完成时已记录；T4 的 target-reset 语义已在
+      PLAN.md 该段注明）
+- [x] 本文档状态更新并归档为 DK 路径参考（2026-09-18 T4 完成时）
 
 ## 4. 参考文件索引
 

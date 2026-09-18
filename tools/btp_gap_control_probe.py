@@ -143,6 +143,7 @@ def run_probe(
     *,
     port_name: str | None = None,
     local_name: str = DEFAULT_LOCAL_NAME,
+    transport: str = "dongle",
 ) -> Path:
     upstream = load_upstream_pins()
     verify_upstream(upstream, settings)
@@ -155,6 +156,7 @@ def run_probe(
         identity = select_application_port(
             port_name=selected_port,
             serial_number=configured_serial,
+            transport=transport,
         )
         loaded = load_autopts(_required_path(settings, "autopts_root"))
     except AutoPtsAdapterError as error:
@@ -293,17 +295,24 @@ class ProbeArguments(argparse.Namespace):
     config: str | None = None
     port: str | None = None
     local_name: str = DEFAULT_LOCAL_NAME
+    transport: str = "dongle"
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Exercise PCA10059 Core/GAP controls through the fixed AutoPTS client"
+        description="Exercise Tester Core/GAP controls through the fixed AutoPTS client"
     )
     _ = parser.add_argument("--config", help="path to the machine-local TOML configuration")
     port_help = "exact current application serial port; otherwise use configured serial/port "
-    port_help += "or the only 2FE3:0004 device"
+    port_help += "or the only application USB device"
     _ = parser.add_argument("--port", help=port_help)
     _ = parser.add_argument("--local-name", default=DEFAULT_LOCAL_NAME)
+    _ = parser.add_argument(
+        "--transport",
+        choices=("dongle", "dk"),
+        default="dongle",
+        help="application USB identity: dongle (PCA10059 CDC) or dk (J-Link VCOM)",
+    )
     return parser
 
 
@@ -315,6 +324,7 @@ def main() -> int:
             resolve_current_settings(config_path=arguments.config),
             port_name=arguments.port,
             local_name=arguments.local_name,
+            transport=arguments.transport,
         )
     except (
         AutoPtsAdapterError,

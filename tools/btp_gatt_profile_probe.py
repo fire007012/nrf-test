@@ -151,6 +151,7 @@ def run_probe(
     rf_timeout_seconds: int | None = None,
     expected_write_role: str | None = None,
     expected_write_value: bytes | None = None,
+    transport: str = "dongle",
 ) -> Path:
     if rf_timeout_seconds is not None and not 5 <= rf_timeout_seconds <= 600:
         raise BtpGattProfileProbeError("RF timeout must be in range 5..=600 seconds")
@@ -172,6 +173,7 @@ def run_probe(
         reports_root=reports_root,
         port_name=selected_port,
         device_serial=settings["device_serial"].value,
+        transport=transport,
     )
     started_at = datetime.now(UTC).isoformat()
 
@@ -375,6 +377,12 @@ def _parser() -> argparse.ArgumentParser:
     _ = parser.add_argument("--rf-timeout", type=int)
     _ = parser.add_argument("--expected-write-role")
     _ = parser.add_argument("--expected-write-hex")
+    _ = parser.add_argument(
+        "--transport",
+        choices=("dongle", "dk"),
+        default="dongle",
+        help="application USB identity: dongle (PCA10059 CDC) or dk (J-Link VCOM)",
+    )
     return parser
 
 
@@ -385,6 +393,7 @@ def main() -> int:
     rf_timeout = cast(int | None, arguments.rf_timeout)
     expected_write_role = cast(str | None, arguments.expected_write_role)
     expected_write_hex = cast(str | None, arguments.expected_write_hex)
+    transport = cast(str, arguments.transport)
     try:
         expected_write_value = (
             bytes.fromhex(expected_write_hex) if expected_write_hex is not None else None
@@ -396,6 +405,7 @@ def main() -> int:
             rf_timeout_seconds=rf_timeout,
             expected_write_role=expected_write_role,
             expected_write_value=expected_write_value,
+            transport=transport,
         )
     except (
         AutoPtsAdapterError,

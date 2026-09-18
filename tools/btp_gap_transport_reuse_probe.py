@@ -161,6 +161,7 @@ def run_probe(
     requested_cycles: int = DEFAULT_CYCLES,
     settle_seconds: float = DEFAULT_SETTLE_SECONDS,
     initial_mode: ServiceStartupMode = ServiceStartupMode.REGISTER,
+    transport: str = "dongle",
 ) -> Path:
     if not 2 <= requested_cycles <= 100:
         raise BtpGapTransportReuseProbeError("cycles must be in range 2..=100")
@@ -178,6 +179,7 @@ def run_probe(
         initial_identity = select_application_port(
             port_name=selected_port,
             serial_number=configured_serial,
+            transport=transport,
         )
         loaded = load_autopts(_required_path(settings, "autopts_root"))
     except AutoPtsAdapterError as error:
@@ -220,7 +222,9 @@ def run_probe(
         recovery_errors: list[str] = []
         try:
             cycle["stage"] = "select-application-port"
-            identity = select_application_port(serial_number=initial_identity.serial_number)
+            identity = select_application_port(
+                serial_number=initial_identity.serial_number, transport=transport
+            )
             cycle["port_before"] = identity_document(identity)
             if identity.serial_number != initial_identity.serial_number:
                 raise BtpGapTransportReuseProbeError(
@@ -354,6 +358,7 @@ class ProbeArguments(argparse.Namespace):
     cycles: int = DEFAULT_CYCLES
     settle: float = DEFAULT_SETTLE_SECONDS
     initial_mode: ServiceStartupMode = ServiceStartupMode.REGISTER
+    transport: str = "dongle"
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -364,7 +369,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     _ = parser.add_argument("--config", help="path to the machine-local TOML configuration")
     port_help = "exact current application serial port; otherwise use configured serial/port "
-    port_help += "or the only 2FE3:0004 device"
+    port_help += "or the only application USB device"
     _ = parser.add_argument("--port", help=port_help)
     _ = parser.add_argument("--local-name", default=DEFAULT_LOCAL_NAME)
     _ = parser.add_argument("--cycles", type=int, default=DEFAULT_CYCLES)
@@ -375,6 +380,12 @@ def _parser() -> argparse.ArgumentParser:
         choices=tuple(ServiceStartupMode),
         default=ServiceStartupMode.REGISTER,
         help="register on a clean boot, or attach to a service left resident by an earlier process",
+    )
+    _ = parser.add_argument(
+        "--transport",
+        choices=("dongle", "dk"),
+        default="dongle",
+        help="application USB identity: dongle (PCA10059 CDC) or dk (J-Link VCOM)",
     )
     return parser
 
@@ -390,6 +401,7 @@ def main() -> int:
             requested_cycles=arguments.cycles,
             settle_seconds=arguments.settle,
             initial_mode=arguments.initial_mode,
+            transport=arguments.transport,
         )
     except (
         AutoPtsAdapterError,

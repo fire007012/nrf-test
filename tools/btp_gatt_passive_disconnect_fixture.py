@@ -183,6 +183,7 @@ def run_fixture(
     port_name: str | None = None,
     timeout_seconds: int = 60,
     disconnect_delay_seconds: float = 1.0,
+    transport: str = "dongle",
 ) -> Path:
     if not 5 <= timeout_seconds <= 600:
         raise BtpGattPassiveDisconnectFixtureError("timeout must be in range 5..=600 seconds")
@@ -200,6 +201,7 @@ def run_fixture(
     identity = select_application_port(
         port_name=selected_port,
         serial_number=settings["device_serial"].value,
+        transport=transport,
     )
     profile = PeripheralProfile.load(profile_path)
     _validate_anchor(profile, anchor)
@@ -442,6 +444,12 @@ def _parser() -> argparse.ArgumentParser:
     )
     _ = parser.add_argument("--timeout", type=int, default=60)
     _ = parser.add_argument("--disconnect-delay", type=float, default=1.0)
+    _ = parser.add_argument(
+        "--transport",
+        choices=("dongle", "dk"),
+        default="dongle",
+        help="application USB identity: dongle (PCA10059 CDC) or dk (J-Link VCOM)",
+    )
     return parser
 
 
@@ -456,6 +464,7 @@ def main() -> int:
             port_name=cast(str | None, arguments.port) or None,
             timeout_seconds=cast(int, arguments.timeout),
             disconnect_delay_seconds=cast(float, arguments.disconnect_delay),
+            transport=cast(str, arguments.transport),
         )
     except (
         AutoPtsAdapterError,

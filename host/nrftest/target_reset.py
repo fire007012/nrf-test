@@ -41,6 +41,15 @@ class TargetResetResult:
     reappearance_seconds: float
 
 
+@dataclass(frozen=True)
+class DkTargetResetResult:
+    """One DK reset outcome: the VCOM port must survive with an identical identity."""
+
+    before: SerialIdentity
+    after: SerialIdentity
+    reset_seconds: float
+
+
 class PyLinkTargetResetDriver:
     """Reset one nRF52840 through an explicitly selected SEGGER J-Link."""
 
@@ -127,6 +136,31 @@ def _matching_application_ports(
         and port.pid == APPLICATION_USB_PID
         and port.serial_number == serial_number
     ]
+
+
+def _identity_facts(identity: SerialIdentity) -> tuple[str, int | None, int | None, str | None]:
+    return (identity.port, identity.vid, identity.pid, identity.serial_number)
+
+
+def _current_identity(
+    port_name: str,
+    ports: Iterable[SerialPort],
+) -> SerialIdentity:
+    named = [port for port in ports if port.device.casefold() == port_name.casefold()]
+    if len(named) != 1:
+        names = ", ".join(port.device for port in ports) or "<none>"
+        raise TargetResetError(
+            f"explicit port {port_name!r} is not uniquely present after reset; "
+            + f"available ports: {names}"
+        )
+    return SerialIdentity(
+        port=named[0].device,
+        description=named[0].description,
+        hwid=named[0].hwid,
+        vid=named[0].vid,
+        pid=named[0].pid,
+        serial_number=named[0].serial_number,
+    )
 
 
 def _wait_for_disappearance(
@@ -248,4 +282,65 @@ def reset_target_and_rediscover(
         after=after,
         disappearance_seconds=disappearance_seconds,
         reappearance_seconds=reappearance_seconds,
+    )
+
+
+def reset_dk_target(
+    driver: TargetResetDriver,
+    before: SerialIdentity,
+    *,
+    ports: Callable[[], Iterable[SerialPort]] = list_ports.comports,
+    monotonic: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+    halt_settle_seconds: float = 0.1,
+) -> DkTargetResetResult:
+    """Reset one DK through J-Link and require the VCOM identity to stay stable.
+
+    Unlike the Dongle, the DK's J-Link VCOM does not disappear while the target is
+    halted, so the recovery boundary here is: reset-and-halt, release, and confirm
+    the same port is present with an identical identity. BTP re-handshake is a
+    separate gate owned by the caller.
+    """
+    if halt_settle_seconds < 0:
+        raise TargetResetError("halt settle seconds must not be negative")
+
+    started = monotonic()
+    main_error: Exception | None = None
+    cleanup_errors: list[str] = []
+    halted = False
+    try:
+        driver.open()
+        driver.reset_and_halt()
+        halted = True
+        sleep(halt_settle_seconds)
+    except Exception as error:
+        main_error = error
+    finally:
+        if halted:
+            try:
+                driver.run()
+            except Exception as error:
+                cleanup_errors.append(f"release: {type(error).__name__}: {error}")
+        try:
+            driver.close()
+        except Exception as error:
+            cleanup_errors.append(f"close: {type(error).__name__}: {error}")
+
+    if main_error is not None or cleanup_errors:
+        details: list[str] = []
+        if main_error is not None:
+            details.append(f"{type(main_error).__name__}: {main_error}")
+        details.extend(cleanup_errors)
+        raise TargetResetError("; ".join(details)) from main_error
+
+    after = _current_identity(before.port, ports())
+    if _identity_facts(after) != _identity_facts(before):
+        raise TargetResetError(
+            "J-Link VCOM identity changed across reset: "
+            + f"expected {_identity_facts(before)!r}, found {_identity_facts(after)!r}"
+        )
+    return DkTargetResetResult(
+        before=before,
+        after=after,
+        reset_seconds=monotonic() - started,
     )

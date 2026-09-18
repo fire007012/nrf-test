@@ -105,6 +105,7 @@ def _child_command(
     local_name: str,
     run_id: str,
     config_path: str | None,
+    transport: str = "dongle",
 ) -> list[str]:
     command = [
         sys.executable,
@@ -120,6 +121,8 @@ def _child_command(
         run_id,
         "--hold-seconds",
         str(CHILD_HOLD_SECONDS),
+        "--transport",
+        transport,
     ]
     if config_path is not None:
         command.extend(("--config", config_path))
@@ -277,6 +280,7 @@ def _run_child(arguments: CrashProbeArguments) -> int:
     identity = select_application_port(
         port_name=arguments.port,
         serial_number=settings["device_serial"].value,
+        transport=arguments.transport,
     )
     loaded = load_autopts(_required_path(settings, "autopts_root"))
     reports_root = _required_path(settings, "reports_dir")
@@ -325,6 +329,7 @@ def run_probe(
     local_name: str = DEFAULT_LOCAL_NAME,
     ready_timeout_seconds: int = DEFAULT_READY_TIMEOUT_SECONDS,
     release_timeout_seconds: int = DEFAULT_RELEASE_TIMEOUT_SECONDS,
+    transport: str = "dongle",
 ) -> Path:
     if not 10 <= ready_timeout_seconds <= 300:
         raise BtpGapHostCrashProbeError("ready timeout must be in range 10..=300 seconds")
@@ -339,6 +344,7 @@ def run_probe(
     identity = select_application_port(
         port_name=selected_port,
         serial_number=settings["device_serial"].value,
+        transport=transport,
     )
     loaded = load_autopts(_required_path(settings, "autopts_root"))
     reports_root = _required_path(settings, "reports_dir")
@@ -351,6 +357,7 @@ def run_probe(
         local_name=local_name,
         run_id=run_id,
         config_path=config_path,
+        transport=transport,
     )
     child_output: list[str] = []
     child_ready: dict[str, object] | None = None
@@ -406,7 +413,9 @@ def run_probe(
         )
         print(f"Serial transport released after {serial_release['elapsed_seconds']} seconds.")
 
-        rediscovered = select_application_port(serial_number=identity.serial_number)
+        rediscovered = select_application_port(
+            serial_number=identity.serial_number, transport=transport
+        )
         if rediscovered.port != identity.port:
             raise BtpGapHostCrashProbeError(
                 f"application port changed from {identity.port} to {rediscovered.port}; "
@@ -528,17 +537,24 @@ class CrashProbeArguments(argparse.Namespace):
     child: bool = False
     run_id: str = ""
     hold_seconds: int = CHILD_HOLD_SECONDS
+    transport: str = "dongle"
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Force-kill a GAP advertising Host and attach without resetting PCA10059"
+        description="Force-kill a GAP advertising Host and attach without resetting the target"
     )
     _ = parser.add_argument("--config", help="path to the machine-local TOML configuration")
     _ = parser.add_argument("--port", help="exact current application serial port")
     _ = parser.add_argument("--local-name", default=DEFAULT_LOCAL_NAME)
     _ = parser.add_argument("--ready-timeout", type=int, default=DEFAULT_READY_TIMEOUT_SECONDS)
     _ = parser.add_argument("--release-timeout", type=int, default=DEFAULT_RELEASE_TIMEOUT_SECONDS)
+    _ = parser.add_argument(
+        "--transport",
+        choices=("dongle", "dk"),
+        default="dongle",
+        help="application USB identity: dongle (PCA10059 CDC) or dk (J-Link VCOM)",
+    )
     _ = parser.add_argument("--child", action="store_true", help=argparse.SUPPRESS)
     _ = parser.add_argument("--run-id", default="", help=argparse.SUPPRESS)
     _ = parser.add_argument(
@@ -562,6 +578,7 @@ def main() -> int:
             local_name=arguments.local_name,
             ready_timeout_seconds=arguments.ready_timeout,
             release_timeout_seconds=arguments.release_timeout,
+            transport=arguments.transport,
         )
     except (
         AutoPtsAdapterError,

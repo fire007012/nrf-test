@@ -7,10 +7,16 @@ import pytest
 from host.nrftest.autopts_adapter import (
     APPLICATION_USB_PID,
     APPLICATION_USB_VID,
+    DK_JLINK_USB_PID,
+    DK_JLINK_USB_VID,
     SerialIdentity,
     select_application_port,
 )
-from host.nrftest.target_reset import TargetResetError, reset_target_and_rediscover
+from host.nrftest.target_reset import (
+    TargetResetError,
+    reset_dk_target,
+    reset_target_and_rediscover,
+)
 
 
 @dataclass
@@ -140,3 +146,99 @@ def test_target_reset_rejects_device_without_stable_hardware_serial() -> None:
         _ = reset_target_and_rediscover(driver, before)
 
     assert driver.calls == []
+
+
+def _dk_identity(port: str = "COM11") -> SerialIdentity:
+    return SerialIdentity(
+        port=port,
+        description="JLink CDC UART Port",
+        hwid="USB VID:PID=1366:1061 SER=001050252028",
+        vid=DK_JLINK_USB_VID,
+        pid=DK_JLINK_USB_PID,
+        serial_number="001050252028",
+    )
+
+
+def test_dk_reset_requires_stable_vcom_identity_across_reset() -> None:
+    dk_port = FakePort(
+        "COM11",
+        serial_number="001050252028",
+        vid=DK_JLINK_USB_VID,
+        pid=DK_JLINK_USB_PID,
+    )
+    before = select_application_port(ports=[dk_port], transport="dk")
+    assert (before.vid, before.pid) == (DK_JLINK_USB_VID, DK_JLINK_USB_PID)
+    driver = FakeResetDriver()
+    clock = FakeClock()
+
+    result = reset_dk_target(
+        driver,
+        before,
+        ports=lambda: [
+            FakePort(
+                "COM11",
+                serial_number="001050252028",
+                vid=DK_JLINK_USB_VID,
+                pid=DK_JLINK_USB_PID,
+            )
+        ],
+        monotonic=clock.monotonic,
+        sleep=clock.sleep,
+    )
+
+    assert driver.calls == ["open", "reset-and-halt", "run", "close"]
+    assert result.before.port == "COM11"
+    assert result.after.port == "COM11"
+    assert result.after.serial_number == "001050252028"
+    assert result.reset_seconds == pytest.approx(0.1)
+
+
+def test_dk_reset_rejects_vcom_identity_change() -> None:
+    before = _dk_identity("COM11")
+    driver = FakeResetDriver()
+
+    with pytest.raises(TargetResetError, match="identity changed across reset"):
+        _ = reset_dk_target(
+            driver,
+            before,
+            ports=lambda: [FakePort("COM11", serial_number="different-serial")],
+        )
+
+    assert driver.calls == ["open", "reset-and-halt", "run", "close"]
+
+
+def test_dk_reset_rejects_missing_vcom_port_after_reset() -> None:
+    before = _dk_identity("COM11")
+    driver = FakeResetDriver()
+
+    with pytest.raises(TargetResetError, match="not uniquely present after reset"):
+        _ = reset_dk_target(driver, before, ports=lambda: [])
+
+    assert driver.calls == ["open", "reset-and-halt", "run", "close"]
+
+
+def test_dk_reset_release_failure_is_reported_with_cleanup() -> None:
+    before = _dk_identity("COM11")
+
+    class ReleaseFailingDriver(FakeResetDriver):
+        def run(self) -> None:
+            super().run()
+            raise RuntimeError("release failed")
+
+    driver = ReleaseFailingDriver()
+
+    with pytest.raises(TargetResetError, match="release failed"):
+        _ = reset_dk_target(
+            driver,
+            before,
+            ports=lambda: [
+                FakePort(
+                    "COM11",
+                    serial_number="001050252028",
+                    vid=DK_JLINK_USB_VID,
+                    pid=DK_JLINK_USB_PID,
+                )
+            ],
+        )
+
+    assert driver.calls == ["open", "reset-and-halt", "run", "close"]
